@@ -13,8 +13,9 @@ public class LolController : MonoBehaviour {
     WebCamTexture webcam; // to access photo camera of the phone
     GameObject container; // camera parent
     int rowSkip = 8; // when comparing two snapshots skip horizontal rows (columns more valuable)
-    float turnpower = 64; // multiplier for yaw movement
-    float sensorsens = 16; // offset multiplier. offset is applied to a previous frame to compare with the current frame
+	float turnpower; // multiplier for yaw movement
+	float sensorsens; // offset multiplier. offset is applied to a previous frame to compare with the current frame
+	float webcamQuality; // resolution of the camera set to 64x64 or whatever value you want
     bool showConfig = false; // used by gui to show menu with params
     bool showLog = false; // used by gui to show scheme of difference areas
 
@@ -38,6 +39,8 @@ public class LolController : MonoBehaviour {
             GUILayout.Label("");
             Slider(1, 300, ref turnpower, "Yaw Speed " + (int)turnpower);
             GUILayout.Label("");
+            Slider(1, 256, ref webcamQuality, "CameraSensor" + (int)webcamQuality);
+            GUILayout.Label("");
             Slider(2, 64, ref sensorsens, "Sensor Speed " + (int)sensorsens);
             GUILayout.Label("");
             float rowskp = rowSkip;
@@ -49,15 +52,11 @@ public class LolController : MonoBehaviour {
                 showLog = !showLog;
                 showConfig = false;
             }
-            if (GUILayout.Button("Swap Eyes")) {
-                var p1 = transform.GetChild(0).transform.localPosition;
-                var p2 = transform.GetChild(1).transform.localPosition;
-                var tmp = p1.x;
-                p1.x = p2.x;
-                p2.x = tmp;
-                transform.GetChild(0).transform.localPosition = p1;
-                transform.GetChild(1).transform.localPosition = p2;
-            }
+            if (GUILayout.Button("Save settings")) {
+				PlayerPrefs.SetFloat("resolution",webcamQuality);
+				PlayerPrefs.SetFloat("yawspeed",webcamQuality);
+				PlayerPrefs.SetFloat("sensorsens",webcamQuality);
+			}
         } else if (showLog) {
             if (diffs != null) {
                 for (int y = 0; y < diffs.GetLength(1); y++) {
@@ -163,8 +162,10 @@ public class LolController : MonoBehaviour {
                 }
             }
             float rot = xdm[bestX];
+            #if UNITY_EDITOR
             rot += Input.GetAxisRaw("Mouse X") * 
                    (Input.GetMouseButton(0) ? 10 : 0);
+            #endif       
             if (less == 0) rot = 0;
             Smooth (ref smoothTP, 10, ref rot);            
             container.transform.Rotate(Vector3.up, 
@@ -225,12 +226,21 @@ public class LolController : MonoBehaviour {
     /// I use 32x32 pixel resolution (blured pixels from texture mip map), that's enough and not too heavy
     /// </summary>
     void Start () {
-        container = new GameObject();
+        if (PlayerPrefs.HasKey ("resolution")) {
+			webcamQuality = PlayerPrefs.GetFloat ("resolution");
+			sensorsens = PlayerPrefs.GetFloat ("sensorsens");
+			turnpower = PlayerPrefs.GetFloat ("yawspeed");
+		} else {
+			webcamQuality = 64;
+			sensorsens = 42;
+			turnpower = 15;
+		}
+        container = new GameObject("Controller");
         gameObject.transform.parent = container.transform;
-        gameObject.transform.localPosition = Vector3.zero;
-        container.transform.position = Vector3.up * 2;
+        gameObject.transform.localPosition = Vector3.up / 2;
+        container.transform.position = new Vector3(0, 2, -3);
         container.AddComponent<CharacterController>();
-        webcam = new WebCamTexture(WebCamTexture.devices[0].name, 32, 32);
+        webcam = new WebCamTexture(WebCamTexture.devices[0].name, (int)webcamQuality, (int)webcamQuality);
         webcam.Play();
     }
 
@@ -244,6 +254,7 @@ public class LolController : MonoBehaviour {
     }
 
     float fspeed = 0;
+    float fspeedd = 0;
     float smoothEAZ = 0, 
           smoothEAX = 0;
     // controls the camera using accelerometer and DetectYaw algorithm
@@ -263,9 +274,10 @@ public class LolController : MonoBehaviour {
         ea.x = value.z * -89;
         Smooth(ref smoothEAZ, 10, ref ea.z);
         Smooth(ref smoothEAX, 15, ref ea.x);
-        if (value.z < -0.33f) fspeed = 2;
-        if (value.z > 0.33f) fspeed = 0;
-        if (value.z > 0.5f) fspeed = -2;
+        //Recoge el movimiento de los pads del joystick
+		float gamepadYAxis = Input.GetAxis("Vertical");
+		fspeed = 2 * gamepadYAxis;
+
         if (fspeed > 0) {
             fspeed -= Time.deltaTime / 10;
             if (fspeed < 0) fspeed = 0;
@@ -273,9 +285,22 @@ public class LolController : MonoBehaviour {
             fspeed += Time.deltaTime / 10;
             if (fspeed > 0) fspeed = 0;
         }
-        container.GetComponent<CharacterController>().
-                  SimpleMove(container.transform.forward * 
-                  fspeed * 15 * Time.deltaTime);
+		float gamepadXAxis = Input.GetAxis("Horizontal");
+		fspeedd = gamepadXAxis;
+		if (fspeedd > 0) {
+			fspeedd -= Time.deltaTime / 10;
+			if (fspeedd < 0) fspeedd = 0;
+		} else if (fspeedd > 0) {
+			fspeedd += Time.deltaTime / 10;
+			if (fspeedd > 0) fspeedd = 0;
+		}
+		/Pasa el movimiento de los pads al jugador, relativo a la camara
+		Vector3 sideways = (container.transform.right * fspeedd * 20 * Time.deltaTime);
+		Vector3 forward = (container.transform.forward * fspeed * 20 * Time.deltaTime);
+
+		Vector3 movimiento = sideways + forward;
+		container.GetComponent<CharacterController>().
+					SimpleMove(movimiento);
         gameObject.transform.localEulerAngles = ea;
         DetectYaw();
     }
